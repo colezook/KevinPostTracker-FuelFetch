@@ -4,17 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Scraper Control Center</title>
+    <link href="styles/output.css" rel="stylesheet">
     <script src="script.js" defer></script>
 </head>
-<body>
-    <h1>Scraper Control Center</h1>
-    <button id="clearPosts">Clear Posts Table</button>
-    <br><br>
-    <button id="runMain">Run Main Post Processing</button>
-    <br><br>
-    <textarea id="userIds" rows="4" cols="50" placeholder="Enter user IDs, one per line"></textarea>
-    <br>
-    <button id="runCustom">Run Custom Post Processing</button>
-    <div id="output"></div>
+<body class="bg-gray-900 text-white p-8">
+    <div class="container mx-auto">
+        <h1 class="text-4xl mb-8 font-bold">Scraper Control Center</h1>
+        <div class="space-y-4">
+            <button id="clearPosts" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">Clear Posts Table</button>
+            <button id="runMain" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded">Run Main Post Processing</button>
+            <div>
+                <textarea id="userIds" rows="4" class="w-full bg-gray-800 text-white border border-gray-700 rounded p-2" placeholder="Enter user IDs, one per line"></textarea>
+            </div>
+            <button id="runCustom" class="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded">Run Custom Post Processing</button>
+        </div>
+        <div id="output" class="mt-8 p-4 border border-gray-700 bg-gray-800 rounded h-96 overflow-y-auto font-mono text-sm"></div>
+    </div>
 </body>
 </html>

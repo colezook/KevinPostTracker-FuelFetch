@@ -2,6 +2,7 @@ const express = require('express');
 const { spawn } = require('child_process');
 const { Pool } = require('pg');
 const bodyParser = require('body-parser');
+const fs = require('fs');
 
 const app = express();
 const port = 3000;
@@ -47,55 +48,90 @@ app.post('/clear-posts', async (req, res) => {
   }
 });
 
-function runPythonScript(args) {
-  return new Promise((resolve, reject) => {
-    const pythonProcess = spawn('python', ['main.py', ...args]);
-    let output = '';
+function runPythonScript(args, res) {
+  const pythonProcess = spawn('python', ['main.py', ...args]);
 
-    pythonProcess.stdout.on('data', (data) => {
-      output += data.toString();
-      console.log(`Python stdout: ${data}`);
+  function sendOutput(data, type = 'output') {
+    const lines = data.toString().split('\n').filter(line => line.trim() !== '');
+    lines.forEach(line => {
+      res.write(`data: ${JSON.stringify({type, message: line})}\n\n`);
     });
+  }
 
-    pythonProcess.stderr.on('data', (data) => {
-      console.error(`Python stderr: ${data}`);
-    });
+  pythonProcess.stdout.on('data', (data) => {
+    sendOutput(data);
+    console.log(`Python stdout: ${data}`);
+  });
 
-    pythonProcess.on('close', (code) => {
-      if (code === 0) {
-        resolve(output);
-      } else {
-        reject(`Python script exited with code ${code}`);
-      }
-    });
+  pythonProcess.stderr.on('data', (data) => {
+    sendOutput(data, 'error');
+    console.error(`Python stderr: ${data}`);
+  });
+
+  pythonProcess.on('close', (code) => {
+    sendOutput(`Process exited with code ${code}`, 'info');
+    res.end();
   });
 }
 
 // Run main post processing
-app.post('/run-main', async (req, res) => {
-  try {
-    const output = await runPythonScript([]);
-    res.json({ message: 'Main post processing completed', output });
-  } catch (error) {
-    console.error(`Error: ${error}`);
-    res.status(500).json({ error: 'Failed to run main post processing' });
-  }
+app.get('/run-main', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+  runPythonScript([], res);
 });
 
 // Run custom post processing
-app.post('/run-custom', async (req, res) => {
-  const { userIds } = req.body;
-  if (!userIds || !Array.isArray(userIds)) {
-    return res.status(400).json({ error: 'Invalid user IDs' });
-  }
+app.get('/run-custom', (req, res) => {
+  const userIds = req.query.userIds.split(',');
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+  runPythonScript(userIds, res);
+});
 
-  try {
-    const output = await runPythonScript(userIds);
-    res.json({ message: 'Custom post processing completed', output });
-  } catch (error) {
-    console.error(`Error: ${error}`);
-    res.status(500).json({ error: 'Failed to run custom post processing' });
-  }
+// Capture console.log and console.error
+const originalConsoleLog = console.log;
+const originalConsoleError = console.error;
+
+console.log = function() {
+  sendToAllClients('output', Array.from(arguments).join(' '));
+  originalConsoleLog.apply(console, arguments);
+};
+
+console.error = function() {
+  sendToAllClients('error', Array.from(arguments).join(' '));
+  originalConsoleError.apply(console, arguments);
+};
+
+// Store all connected clients
+const clients = new Set();
+
+function sendToAllClients(type, message) {
+  clients.forEach(client => {
+    client.res.write(`data: ${JSON.stringify({type, message})}\n\n`);
+  });
+}
+
+// New route for SSE connection
+app.get('/events', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+
+  const client = { id: Date.now(), res };
+  clients.add(client);
+
+  req.on('close', () => {
+    clients.delete(client);
+  });
 });
 
 app.listen(port, () => {
@@ -108,6 +144,5 @@ console.log('Database config:', {
   user: process.env.PGUSER,
   host: process.env.PGHOST,
   port: process.env.PGPORT,
-  ssl: true, // Add this line to indicate SSL is being used
-  // Don't log the password for security reasons
+  ssl: true,
 });
