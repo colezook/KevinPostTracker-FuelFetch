@@ -15,11 +15,17 @@ function appendToOutput(text, type = 'output') {
 async function clearPosts() {
     try {
         const response = await fetch('/clear-posts', { method: 'POST' });
-        const data = await response.json();
-        if (data.success) {
-            appendToOutput(data.message, 'info');
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+            const data = await response.json();
+            if (data.success) {
+                appendToOutput(data.message, 'info');
+            } else {
+                throw new Error(data.error || 'Unknown error occurred');
+            }
         } else {
-            throw new Error(data.error || 'Unknown error occurred');
+            const text = await response.text();
+            throw new Error(`Unexpected response: ${text.substring(0, 100)}...`);
         }
     } catch (error) {
         console.error('Error:', error);

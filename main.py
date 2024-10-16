@@ -110,11 +110,14 @@ async def insert_post_data(conn, cursor, post_data):
     url_segment = instagram_id_to_url_segment(post_data['pk'])
     instagram_url = f"https://www.instagram.com/reel/{url_segment}/"
 
+    caption = post_data.get('caption')
+    caption_text = caption.get('text') if isinstance(caption, dict) else None
+
     values = (
         post_data['user']['pk'],
         post_data['pk'],
         post_data['user']['username'],
-        post_data.get('caption', {}).get('text'),
+        caption_text,
         post_data.get('play_count', 0),
         post_data.get('comment_count', 0),
         post_data.get('like_count', 0),
