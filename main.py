@@ -7,6 +7,7 @@ from config import USER_IDS as DEFAULT_USER_IDS, API_BASE_URL, OUTPUT_FOLDER, DA
 import psycopg2
 from psycopg2 import sql
 import sys
+import argparse
 
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 BASE = len(ALPHABET)
@@ -88,7 +89,12 @@ def find_old_timestamp(data):
                 return result
     return None
 
-async def insert_post_data(conn, cursor, post_data):
+async def insert_post_data(conn, cursor, post_data, allowed_user_ids):
+    # Check if the post's user_id is in the allowed_user_ids list
+    if str(post_data['user']['pk']) not in allowed_user_ids:
+        print(f"Skipping post {post_data['pk']} from user {post_data['user']['pk']} (not in allowed user list)")
+        return
+
     query = sql.SQL("""
     INSERT INTO posts (
         user_id, post_id, username, caption, play_count, comment_count, 
@@ -132,7 +138,7 @@ async def insert_post_data(conn, cursor, post_data):
     cursor.execute(query, values)
     conn.commit()
 
-async def process_user(session, access_key, user_id):
+async def process_user(session, access_key, user_id, allowed_user_ids):
     print(f"Processing user ID: {user_id}")
     next_page_id = None
     page_number = 1
@@ -153,7 +159,7 @@ async def process_user(session, access_key, user_id):
                 # Process and insert each post
                 for item in result['response']['items']:
                     post_data = item['media']
-                    await insert_post_data(conn, cursor, post_data)
+                    await insert_post_data(conn, cursor, post_data, allowed_user_ids)
 
                 old_timestamp = find_old_timestamp(result)
                 if old_timestamp:
@@ -182,16 +188,19 @@ async def process_user(session, access_key, user_id):
 async def main(user_ids):
     access_key = os.environ['HAPI_KEY']
 
+    print(f"Scraping clips from the IDs: {', '.join(user_ids)}")
+    print(f"Timeframe: Last {DAYS_TO_LOOK_BACK} days")
     print(f"Using access key: {access_key[:5]}...{access_key[-5:]}")
-    print(f"Looking for posts older than {DAYS_TO_LOOK_BACK} days")
     print(f"Using database: {DB_CONFIG['dbname']} on host: {DB_CONFIG['host']}")
 
     async with aiohttp.ClientSession() as session:
-        tasks = [process_user(session, access_key, user_id) for user_id in user_ids]
+        tasks = [process_user(session, access_key, user_id, user_ids) for user_id in user_ids]
         await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    # This block will only execute if the script is run directly
-    custom_user_ids = sys.argv[1:] if len(sys.argv) > 1 else None
-    user_ids_to_process = custom_user_ids if custom_user_ids else DEFAULT_USER_IDS
+    parser = argparse.ArgumentParser(description='Process Instagram user clips.')
+    parser.add_argument('--user_ids', type=str, help='Comma-separated list of user IDs')
+    args = parser.parse_args()
+
+    user_ids_to_process = args.user_ids.split(',') if args.user_ids else DEFAULT_USER_IDS
     asyncio.run(main(user_ids_to_process))

@@ -126,13 +126,14 @@ app.get('/run-main', (req, res) => {
 
 // Run custom post processing
 app.get('/run-custom', (req, res) => {
-  const userIds = req.query.userIds.split(',');
+  const customUserIds = req.query.userIds.split(',');
+  const allowedUserIds = getAllowedUserIds(customUserIds);
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive'
   });
-  runPythonScript(userIds, res);
+  runPythonScript(['--user_ids', allowedUserIds.join(',')], res);
 });
 
 // Capture console.log and console.error
@@ -186,3 +187,8 @@ console.log('Database config:', {
   port: process.env.PGPORT,
   ssl: true,
 });
+
+function getAllowedUserIds(customUserIds) {
+  const defaultUserIds = USER_IDS;
+  return [...new Set([...defaultUserIds, ...customUserIds])];
+}
