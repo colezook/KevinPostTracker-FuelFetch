@@ -48,6 +48,26 @@ app.post('/clear-posts', async (req, res) => {
   }
 });
 
+async function addTimestampColumnToPosts() {
+  const client = await pool.connect();
+  try {
+    await client.query('ALTER TABLE posts ADD COLUMN IF NOT EXISTS timestamp TIMESTAMP WITH TIME ZONE');
+    console.log('Successfully added timestamp column to posts table');
+    return { success: true, message: 'Successfully added timestamp column to posts table' };
+  } catch (error) {
+    console.error('Error adding timestamp column to posts table:', error);
+    return { success: false, error: 'Failed to add timestamp column to posts table', details: error.message };
+  } finally {
+    client.release();
+  }
+}
+
+// Add a new route to trigger the column addition
+app.post('/add-timestamp-column', async (req, res) => {
+  const result = await addTimestampColumnToPosts();
+  res.json(result);
+});
+
 function runPythonScript(args, res) {
   const pythonProcess = spawn('python', ['main.py', ...args]);
 

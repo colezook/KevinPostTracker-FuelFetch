@@ -81,30 +81,35 @@ async def insert_post_data(conn, cursor, post_data):
     query = sql.SQL("""
     INSERT INTO posts (
         user_id, post_id, username, caption, play_count, comment_count, 
-        like_count, save_count, share_count, video_url, cover_url
+        like_count, save_count, share_count, video_url, cover_url, timestamp
     ) VALUES (
-        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
     )
     ON CONFLICT (post_id) DO UPDATE SET
         play_count = EXCLUDED.play_count,
         comment_count = EXCLUDED.comment_count,
         like_count = EXCLUDED.like_count,
         save_count = EXCLUDED.save_count,
-        share_count = EXCLUDED.share_count
+        share_count = EXCLUDED.share_count,
+        timestamp = EXCLUDED.timestamp
     """)
+
+    taken_at = post_data.get('taken_at')
+    utc_timestamp = unix_to_utc(taken_at) if taken_at else None
 
     values = (
         post_data['user']['pk'],
-        post_data['id'],
+        post_data['pk'],
         post_data['user']['username'],
         post_data.get('caption', {}).get('text'),
         post_data.get('play_count', 0),
         post_data.get('comment_count', 0),
         post_data.get('like_count', 0),
-        post_data.get('save_count') if 'save_count' in post_data else None,  # Changed this line
+        post_data.get('save_count') if 'save_count' in post_data else None,
         post_data.get('reshare_count', 0),
         post_data.get('video_url'),
-        post_data.get('thumbnail_url')
+        post_data.get('thumbnail_url'),
+        utc_timestamp
     )
 
     cursor.execute(query, values)
