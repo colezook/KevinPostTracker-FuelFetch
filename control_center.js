@@ -68,6 +68,26 @@ app.post('/add-timestamp-column', async (req, res) => {
   res.json(result);
 });
 
+async function addUrlColumnToPosts() {
+  const client = await pool.connect();
+  try {
+    await client.query('ALTER TABLE posts ADD COLUMN IF NOT EXISTS url TEXT');
+    console.log('Successfully added url column to posts table');
+    return { success: true, message: 'Successfully added url column to posts table' };
+  } catch (error) {
+    console.error('Error adding url column to posts table:', error);
+    return { success: false, error: 'Failed to add url column to posts table', details: error.message };
+  } finally {
+    client.release();
+  }
+}
+
+// Add a new route to trigger the column addition
+app.post('/add-url-column', async (req, res) => {
+  const result = await addUrlColumnToPosts();
+  res.json(result);
+});
+
 function runPythonScript(args, res) {
   const pythonProcess = spawn('python', ['main.py', ...args]);
 

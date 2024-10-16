@@ -8,8 +8,19 @@ import psycopg2
 from psycopg2 import sql
 import sys
 
+ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+BASE = len(ALPHABET)
+
 def unix_to_utc(timestamp):
     return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+
+def instagram_id_to_url_segment(instagram_id):
+    id_num = int(instagram_id)
+    result = []
+    while id_num > 0:
+        result.insert(0, ALPHABET[id_num % BASE])
+        id_num //= BASE
+    return ''.join(result)
 
 async def get_user_clips(session, access_key, user_id, page_id=None):
     headers = {
@@ -81,21 +92,23 @@ async def insert_post_data(conn, cursor, post_data):
     query = sql.SQL("""
     INSERT INTO posts (
         user_id, post_id, username, caption, play_count, comment_count, 
-        like_count, save_count, share_count, video_url, cover_url, timestamp
+        like_count, save_count, share_count, video_url, cover_url, timestamp, url
     ) VALUES (
-        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
     )
     ON CONFLICT (post_id) DO UPDATE SET
         play_count = EXCLUDED.play_count,
         comment_count = EXCLUDED.comment_count,
         like_count = EXCLUDED.like_count,
         save_count = EXCLUDED.save_count,
-        share_count = EXCLUDED.share_count,
-        timestamp = EXCLUDED.timestamp
+        share_count = EXCLUDED.share_count
     """)
 
     taken_at = post_data.get('taken_at')
     utc_timestamp = unix_to_utc(taken_at) if taken_at else None
+    
+    url_segment = instagram_id_to_url_segment(post_data['pk'])
+    instagram_url = f"https://www.instagram.com/reel/{url_segment}/"
 
     values = (
         post_data['user']['pk'],
@@ -109,7 +122,8 @@ async def insert_post_data(conn, cursor, post_data):
         post_data.get('reshare_count', 0),
         post_data.get('video_url'),
         post_data.get('thumbnail_url'),
-        utc_timestamp
+        utc_timestamp,
+        instagram_url
     )
 
     cursor.execute(query, values)
