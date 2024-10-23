@@ -89,14 +89,14 @@ def find_old_timestamp(data):
                 return result
     return None
 
-async def insert_post_data(conn, cursor, post_data, allowed_user_ids):
+async def insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id):
     # Check if the post's user_id is in the allowed_user_ids list
     if str(post_data['user']['pk']) not in allowed_user_ids:
         print(f"Skipping post {post_data['pk']} from user {post_data['user']['pk']} (not in allowed user list)")
         return
 
     query = sql.SQL("""
-    INSERT INTO posts (
+    INSERT INTO {} (
         user_id, post_id, username, caption, play_count, comment_count, 
         like_count, save_count, share_count, video_url, cover_url, timestamp, url
     ) VALUES (
@@ -107,8 +107,9 @@ async def insert_post_data(conn, cursor, post_data, allowed_user_ids):
         comment_count = EXCLUDED.comment_count,
         like_count = EXCLUDED.like_count,
         save_count = EXCLUDED.save_count,
-        share_count = EXCLUDED.share_count
-    """)
+        share_count = EXCLUDED.share_count,
+        updated_at = CURRENT_TIMESTAMP
+    """).format(sql.Identifier(f"clips_{user_id}"))
 
     taken_at = post_data.get('taken_at')
     utc_timestamp = unix_to_utc(taken_at) if taken_at else None
@@ -148,6 +149,48 @@ async def process_user(session, access_key, user_id, allowed_user_ids):
     cursor = conn.cursor()
 
     try:
+        # Check if the table exists for this user_id
+        cursor.execute(f"SELECT to_regclass('public.clips_{user_id}')")
+        table_exists = cursor.fetchone()[0]
+
+        if not table_exists:
+            # Create the table if it doesn't exist
+            create_table_query = f"""
+            CREATE TABLE clips_{user_id} (
+                post_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                username TEXT NOT NULL,
+                timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+                play_count INTEGER,
+                like_count INTEGER,
+                comment_count INTEGER,
+                save_count INTEGER,
+                share_count INTEGER,
+                url TEXT,
+                video_url TEXT,
+                cover_url TEXT,
+                caption TEXT,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE OR REPLACE FUNCTION update_updated_at()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                NEW.updated_at = CURRENT_TIMESTAMP;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            CREATE TRIGGER update_clips_{user_id}_updated_at
+            BEFORE UPDATE ON clips_{user_id}
+            FOR EACH ROW
+            EXECUTE FUNCTION update_updated_at();
+            """
+            cursor.execute(create_table_query)
+            conn.commit()
+            print(f"Created table clips_{user_id}")
+
         while not found_old_post:
             result = await get_user_clips(session, access_key, user_id, next_page_id)
 
@@ -159,7 +202,7 @@ async def process_user(session, access_key, user_id, allowed_user_ids):
                 # Process and insert each post
                 for item in result['response']['items']:
                     post_data = item['media']
-                    await insert_post_data(conn, cursor, post_data, allowed_user_ids)
+                    await insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id)
 
                 old_timestamp = find_old_timestamp(result)
                 if old_timestamp:

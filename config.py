@@ -2,12 +2,12 @@
 import os
 
 USER_IDS = [
-    "50062729418",
+    "62940276237",
 ]
 
 
 # Number of days to look back for old posts
-DAYS_TO_LOOK_BACK = 100
+DAYS_TO_LOOK_BACK = 365
 
 # You can add other configuration variables here if needed
 API_BASE_URL = "https://api.hikerapi.com/v2/user/clips"
