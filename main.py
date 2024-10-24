@@ -8,6 +8,7 @@ import psycopg2
 from psycopg2 import sql
 import sys
 import argparse
+from s3_uploader import upload_media_to_s3_and_update_db  # Import only the necessary function
 
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 BASE = len(ALPHABET)
@@ -224,6 +225,10 @@ async def process_user(session, access_key, user_id, allowed_user_ids):
                 break
 
         print(f"Total pages fetched for user {user_id}: {page_number}")
+
+        # After processing all pages, upload media to S3 and update DB
+        await upload_media_to_s3_and_update_db(conn, cursor, user_id)
+
     finally:
         cursor.close()
         conn.close()
