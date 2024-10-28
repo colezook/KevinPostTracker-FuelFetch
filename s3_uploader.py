@@ -65,7 +65,7 @@ async def upload_media_to_s3_and_update_db(conn, cursor, user_id):
         try:
             # Upload video to S3
             if video_url:
-                video_s3_url = await upload_to_s3(video_url, bucket_name, f"fuelcovers/{post_id}_{user_id}.mp4")
+                video_s3_url = await upload_to_s3(video_url, bucket_name, f"fuelvideos/{post_id}_{user_id}.mp4")
                 video_cloudfront_url = generate_cloudfront_url(video_s3_url)
             else:
                 video_cloudfront_url = None
