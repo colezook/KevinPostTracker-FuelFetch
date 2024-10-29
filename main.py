@@ -96,21 +96,25 @@ async def insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id):
         print(f"Skipping post {post_data['pk']} from user {post_data['user']['pk']} (not in allowed user list)")
         return
 
-    query = sql.SQL("""
-    INSERT INTO {} (
-        user_id, post_id, username, caption, play_count, comment_count, 
-        like_count, save_count, share_count, video_url, cover_url, timestamp, url
-    ) VALUES (
-        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+    # First check if post exists and get its current URLs
+    cursor.execute(
+        sql.SQL("SELECT video_url, cover_url FROM {} WHERE post_id = %s").format(
+            sql.Identifier(f"clips_{user_id}")
+        ),
+        [post_data['pk']]
     )
-    ON CONFLICT (post_id) DO UPDATE SET
-        play_count = EXCLUDED.play_count,
-        comment_count = EXCLUDED.comment_count,
-        like_count = EXCLUDED.like_count,
-        save_count = EXCLUDED.save_count,
-        share_count = EXCLUDED.share_count,
-        updated_at = CURRENT_TIMESTAMP
-    """).format(sql.Identifier(f"clips_{user_id}"))
+    existing_urls = cursor.fetchone()
+
+    # Keep existing Cloudfront URLs if they exist
+    video_url = post_data.get('video_url')
+    cover_url = post_data.get('thumbnail_url')
+    
+    if existing_urls:
+        existing_video_url, existing_cover_url = existing_urls
+        if existing_video_url and existing_video_url.startswith('https://d16ptydiypnzmb.cloudfront.net'):
+            video_url = existing_video_url
+        if existing_cover_url and existing_cover_url.startswith('https://d16ptydiypnzmb.cloudfront.net'):
+            cover_url = existing_cover_url
 
     taken_at = post_data.get('taken_at')
     utc_timestamp = unix_to_utc(taken_at) if taken_at else None
@@ -122,29 +126,67 @@ async def insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id):
     caption_text = caption.get('text') if isinstance(caption, dict) else None
 
     values = (
-        post_data['user']['pk'],
-        post_data['pk'],
-        post_data['user']['username'],
-        caption_text,
-        post_data.get('play_count', 0),
-        post_data.get('comment_count', 0),
-        post_data.get('like_count', 0),
-        post_data.get('save_count') if 'save_count' in post_data else None,
-        post_data.get('reshare_count', 0),
-        post_data.get('video_url'),
-        post_data.get('thumbnail_url'),
-        utc_timestamp,
-        instagram_url
+        post_data['user']['pk'],                                      # user_id
+        post_data['pk'],                                             # post_id
+        post_data['user']['username'],                               # username
+        caption_text,                                                # caption
+        post_data.get('play_count', 0),                             # play_count
+        post_data.get('comment_count', 0),                          # comment_count
+        post_data.get('like_count', 0),                             # like_count
+        post_data.get('save_count') if 'save_count' in post_data else None,  # save_count
+        post_data.get('reshare_count', 0),                          # share_count
+        video_url,                                                   # video_url
+        cover_url,                                                   # cover_url
+        utc_timestamp,                                              # timestamp
+        instagram_url                                               # url
     )
 
-    cursor.execute(query, values)
-    conn.commit()
+    try:
+        query = sql.SQL("""
+            INSERT INTO {table} (
+                user_id, post_id, username, caption, play_count, comment_count, 
+                like_count, save_count, share_count, video_url, cover_url, timestamp, url
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )
+            ON CONFLICT (post_id) DO UPDATE SET
+                play_count = EXCLUDED.play_count,
+                comment_count = EXCLUDED.comment_count,
+                like_count = EXCLUDED.like_count,
+                save_count = EXCLUDED.save_count,
+                share_count = EXCLUDED.share_count,
+                video_url = CASE 
+                    WHEN {table}.video_url IS NULL OR NOT {table}.video_url LIKE %s
+                    THEN EXCLUDED.video_url
+                    ELSE {table}.video_url
+                END,
+                cover_url = CASE 
+                    WHEN {table}.cover_url IS NULL OR NOT {table}.cover_url LIKE %s
+                    THEN EXCLUDED.cover_url
+                    ELSE {table}.cover_url
+                END,
+                updated_at = CURRENT_TIMESTAMP
+        """).format(
+            table=sql.Identifier(f"clips_{user_id}")
+        )
+        
+        # Add the cloudfront pattern to the values tuple for the LIKE conditions
+        cloudfront_pattern = 'https://d16ptydiypnzmb.cloudfront.net%'
+        all_values = values + (cloudfront_pattern, cloudfront_pattern)
+        
+        cursor.execute(query, all_values)
+        conn.commit()
+    except Exception as e:
+        print(f"Error inserting post {post_data['pk']}: {str(e)}")
+        print(f"Values: {values}")
+        raise
 
 async def process_user(session, access_key, user_id, allowed_user_ids):
     print(f"Processing user ID: {user_id}")
     next_page_id = None
     page_number = 1
     found_old_post = False
+    posts_to_process = []  # Store posts for batch processing
 
     conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
@@ -200,10 +242,13 @@ async def process_user(session, access_key, user_id, allowed_user_ids):
 
                 save_json_to_file(result, user_id, page_number)
 
-                # Process and insert each post
+                # Collect posts for processing
                 for item in result['response']['items']:
                     post_data = item['media']
-                    await insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id)
+                    if str(post_data['user']['pk']) in allowed_user_ids:
+                        posts_to_process.append(post_data)
+                    else:
+                        print(f"Skipping post {post_data['pk']} from user {post_data['user']['pk']} (not in allowed user list)")
 
                 old_timestamp = find_old_timestamp(result)
                 if old_timestamp:
@@ -225,9 +270,23 @@ async def process_user(session, access_key, user_id, allowed_user_ids):
                 break
 
         print(f"Total pages fetched for user {user_id}: {page_number}")
+        print(f"Found {len(posts_to_process)} posts to process for user {user_id}")
+        print("Inserting posts into database...")
 
-        # After processing all pages, upload media to S3 and update DB
-        await upload_media_to_s3_and_update_db(conn, cursor, user_id)
+        # Process posts in batches (silently)
+        for post_data in posts_to_process:
+            await insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id)
+            
+        print(f"Successfully inserted {len(posts_to_process)} posts into database")
+            
+        # After processing all posts, upload media to S3 and update DB with progress tracking
+        print(f"\nStarting media upload process for {len(posts_to_process)} posts from user {user_id}")
+        await upload_media_to_s3_and_update_db(
+            conn, 
+            cursor, 
+            user_id,
+            total_posts=len(posts_to_process)
+        )
 
     finally:
         cursor.close()

@@ -53,44 +53,87 @@ async def upload_to_s3(file_url, bucket_name, object_name):
         print("Credentials not available for AWS S3")
         return None
 
-async def upload_media_to_s3_and_update_db(conn, cursor, user_id):
-    bucket_name = 'vbrain1.0'
-    all_successful = True
-    
-    # Fetch all posts that need to be uploaded
-    cursor.execute(sql.SQL("SELECT post_id, video_url, cover_url FROM {}").format(sql.Identifier(f"clips_{user_id}")))
+async def upload_media_to_s3_and_update_db(conn, cursor, user_id, total_posts):
+    """
+    Upload media files to S3 and update database with CloudFront URLs.
+    """
+    cursor.execute(
+        sql.SQL("""
+            SELECT post_id, video_url, cover_url 
+            FROM {} 
+            WHERE (
+                (video_url IS NOT NULL AND video_url NOT LIKE 'https://d16ptydiypnzmb.cloudfront.net%') OR 
+                (cover_url IS NOT NULL AND cover_url NOT LIKE 'https://d16ptydiypnzmb.cloudfront.net%')
+            )
+        """).format(sql.Identifier(f"clips_{user_id}"))
+    )
     posts = cursor.fetchall()
-
-    for post_id, video_url, cover_url in posts:
+    
+    print(f"\nFound {len(posts)} posts with media to process for user {user_id}")
+    
+    bucket_name = 'vbrain1.0'
+    
+    for i, (post_id, video_url, cover_url) in enumerate(posts, 1):
+        print(f"\nProcessing media {i}/{len(posts)} for post {post_id}")
+        new_video_url = None
+        new_cover_url = None
+        
         try:
-            # Upload video to S3
-            if video_url:
-                video_s3_url = await upload_to_s3(video_url, bucket_name, f"fuelvideos/{post_id}_{user_id}.mp4")
-                video_cloudfront_url = generate_cloudfront_url(video_s3_url)
-            else:
-                video_cloudfront_url = None
-
-            # Upload cover to S3
-            if cover_url:
-                cover_s3_url = await upload_to_s3(cover_url, bucket_name, f"fuelcovers/{post_id}_{user_id}.jpg")
-                cover_cloudfront_url = generate_cloudfront_url(cover_s3_url)
-            else:
-                cover_cloudfront_url = None
-
-            # Update the database with the new CloudFront URLs
-            update_query = sql.SQL("""
-            UPDATE {} SET
-                video_url = %s,
-                cover_url = %s,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE post_id = %s
-            """).format(sql.Identifier(f"clips_{user_id}"))
-
-            cursor.execute(update_query, (video_cloudfront_url, cover_cloudfront_url, post_id))
-            conn.commit()
+            if video_url and not video_url.startswith('https://d16ptydiypnzmb.cloudfront.net'):
+                print(f"[{i}/{len(posts)}] Uploading video for post {post_id}")
+                video_object_name = f"fuelvideos/{post_id}_{user_id}.mp4"
+                s3_video_url = await upload_to_s3(video_url, bucket_name, video_object_name)
+                if s3_video_url:
+                    new_video_url = generate_cloudfront_url(video_object_name)
+                    print(f"✓ Video uploaded successfully: {new_video_url}")
+                else:
+                    print(f"✗ Failed to upload video for post {post_id}")
+            
+            if cover_url and not cover_url.startswith('https://d16ptydiypnzmb.cloudfront.net'):
+                print(f"[{i}/{len(posts)}] Uploading cover image for post {post_id}")
+                cover_object_name = f"fuelcovers/{post_id}_{user_id}.jpg"
+                s3_cover_url = await upload_to_s3(cover_url, bucket_name, cover_object_name)
+                if s3_cover_url:
+                    new_cover_url = generate_cloudfront_url(cover_object_name)
+                    print(f"✓ Cover image uploaded successfully: {new_cover_url}")
+                else:
+                    print(f"✗ Failed to upload cover image for post {post_id}")
+            
+            # Update database only if we have new URLs
+            if new_video_url or new_cover_url:
+                update_query = []
+                update_values = []
+                
+                if new_video_url:
+                    update_query.append("video_url = %s")
+                    update_values.append(new_video_url)
+                
+                if new_cover_url:
+                    update_query.append("cover_url = %s")
+                    update_values.append(new_cover_url)
+                
+                if update_query:
+                    try:
+                        query = sql.SQL("""
+                            UPDATE {}
+                            SET {} 
+                            WHERE post_id = %s
+                        """).format(
+                            sql.Identifier(f"clips_{user_id}"),
+                            sql.SQL(", ").join(map(sql.SQL, update_query))
+                        )
+                        
+                        cursor.execute(query, update_values + [post_id])
+                        conn.commit()
+                        print(f"✓ Database updated successfully for post {post_id}")
+                    except Exception as db_error:
+                        conn.rollback()  # Rollback the failed transaction
+                        print(f"✗ Database update failed for post {post_id}: {str(db_error)}")
+                        continue  # Continue with next post
+            
+            print(f"Completed {i}/{len(posts)} ({(i/len(posts)*100):.1f}%) media conversions for user {user_id}")
+            
         except Exception as e:
-            print(f"Error uploading {post_id} to S3 Bucket: {e}")
-            all_successful = False
-
-    if all_successful:
-        print("All Cloudfront URLs Generated & Inserted")
+            conn.rollback()  # Rollback any failed transaction
+            print(f"✗ Error processing post {post_id}: {str(e)}")
+            continue  # Continue with next post
