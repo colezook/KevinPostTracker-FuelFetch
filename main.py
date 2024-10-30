@@ -9,6 +9,7 @@ from psycopg2 import sql
 import sys
 import argparse
 from s3_uploader import upload_media_to_s3_and_update_db  # Import only the necessary function
+from profile_stats import process_user_profile
 
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 BASE = len(ALPHABET)
@@ -295,17 +296,25 @@ async def process_user(session, access_key, user_id, allowed_user_ids):
 async def main(user_ids):
     access_key = os.environ['HAPI_KEY']
 
-    print(f"Scraping clips from the IDs: {', '.join(user_ids)}")
+    print(f"Scraping clips and profiles from the IDs: {', '.join(user_ids)}")
     print(f"Timeframe: Last {DAYS_TO_LOOK_BACK} days")
     print(f"Using access key: {access_key[:5]}...{access_key[-5:]}")
     print(f"Using database: {DB_CONFIG['dbname']} on host: {DB_CONFIG['host']}")
 
     async with aiohttp.ClientSession() as session:
-        tasks = [process_user(session, access_key, user_id, user_ids) for user_id in user_ids]
-        await asyncio.gather(*tasks)
+        try:
+            # Create tasks for both clips and profile processing
+            clips_tasks = [process_user(session, access_key, user_id, user_ids) for user_id in user_ids]
+            profile_tasks = [process_user_profile(user_id) for user_id in user_ids]
+
+            # Run all tasks concurrently
+            await asyncio.gather(*clips_tasks, *profile_tasks)
+        except Exception as e:
+            print(f"Error during processing: {str(e)}")
+            raise
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Process Instagram user clips.')
+    parser = argparse.ArgumentParser(description='Process Instagram user clips and profiles.')
     parser.add_argument('--user_ids', type=str, help='Comma-separated list of user IDs')
     args = parser.parse_args()
 
