@@ -11,11 +11,23 @@ import argparse
 from s3_uploader import upload_media_to_s3_and_update_db  # Import only the necessary function
 import time
 from contextlib import contextmanager
+import psycopg2.pool
+from psycopg2.pool import PoolError
 
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 BASE = len(ALPHABET)
-MAX_DB_RETRIES = 3
-DB_RETRY_DELAY = 5  # seconds
+MAX_DB_RETRIES = 5
+DB_RETRY_DELAY = 10
+DB_KEEPALIVE_INTERVAL = 30
+MIN_POOL_SIZE = 3
+MAX_POOL_SIZE = 20
+POOL_TIMEOUT = 30
+
+# Add semaphore for limiting concurrent DB operations
+DB_SEMAPHORE_LIMIT = 5  # Adjust based on your MAX_POOL_SIZE
+
+# Create a global connection pool
+db_pool = None
 
 def unix_to_utc(timestamp):
     return datetime.fromtimestamp(timestamp, tz=timezone.utc)
@@ -186,145 +198,211 @@ async def insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id):
             print(f"Database operation attempt {attempt + 1} failed, retrying in {DB_RETRY_DELAY} seconds...")
             time.sleep(DB_RETRY_DELAY)
 
-async def process_user(session, access_key, user_id, allowed_user_ids):
+@contextmanager
+def get_db_connection():
+    """Context manager for getting a connection from the pool with retry logic"""
+    global db_pool
+    conn = None
+    
+    for attempt in range(MAX_DB_RETRIES):
+        try:
+            conn = db_pool.getconn()
+            if conn:
+                try:
+                    # Set session characteristics
+                    conn.set_session(autocommit=False)
+                    conn.set_client_encoding('UTF8')
+                    yield conn
+                finally:
+                    # Always return connection to pool
+                    if conn:
+                        try:
+                            if conn.closed == 0:  # If connection is still open
+                                conn.rollback()  # Rollback any uncommitted changes
+                            db_pool.putconn(conn)
+                        except Exception as e:
+                            print(f"Error returning connection to pool: {e}")
+                return
+        except (psycopg2.OperationalError, psycopg2.InterfaceError, PoolError) as e:
+            if conn:
+                try:
+                    db_pool.putconn(conn, close=True)
+                except:
+                    pass
+                conn = None
+            
+            if attempt == MAX_DB_RETRIES - 1:  # Last attempt
+                print(f"Failed to get connection from pool after {MAX_DB_RETRIES} attempts: {str(e)}")
+                raise
+            print(f"Database connection attempt {attempt + 1} failed, retrying in {DB_RETRY_DELAY} seconds... Error: {str(e)}")
+            time.sleep(DB_RETRY_DELAY)
+            
+            # Try to reinitialize the pool if we're having connection issues
+            try:
+                init_db_pool()
+            except:
+                pass
+
+async def process_user(session, access_key, user_id, allowed_user_ids, semaphore):
+    """Modified to use semaphore for DB connection management"""
     print(f"Processing user ID: {user_id}")
     next_page_id = None
     page_number = 1
     found_old_post = False
-    posts_to_process = []  # Store posts for batch processing
+    posts_to_process = []
 
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        try:
-            # Check if the clips table exists
-            cursor.execute("SELECT to_regclass('public.clips')")
-            table_exists = cursor.fetchone()[0]
+    # Use semaphore to limit concurrent DB operations
+    async with semaphore:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                # Check if the clips table exists
+                cursor.execute("SELECT to_regclass('public.clips')")
+                table_exists = cursor.fetchone()[0]
 
-            if not table_exists:
-                # Create the table if it doesn't exist
-                create_table_query = """
-                CREATE TABLE clips (
-                    post_id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    username TEXT NOT NULL,
-                    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-                    play_count INTEGER,
-                    like_count INTEGER,
-                    comment_count INTEGER,
-                    save_count INTEGER,
-                    share_count INTEGER,
-                    url TEXT,
-                    video_url TEXT,
-                    cover_url TEXT,
-                    caption TEXT,
-                    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
+                if not table_exists:
+                    # Create the table if it doesn't exist
+                    create_table_query = """
+                    CREATE TABLE clips (
+                        post_id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        username TEXT NOT NULL,
+                        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+                        play_count INTEGER,
+                        like_count INTEGER,
+                        comment_count INTEGER,
+                        save_count INTEGER,
+                        share_count INTEGER,
+                        url TEXT,
+                        video_url TEXT,
+                        cover_url TEXT,
+                        caption TEXT,
+                        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
 
-                CREATE OR REPLACE FUNCTION update_updated_at()
-                RETURNS TRIGGER AS $$
-                BEGIN
-                    NEW.updated_at = CURRENT_TIMESTAMP;
-                    RETURN NEW;
-                END;
-                $$ LANGUAGE plpgsql;
+                    CREATE OR REPLACE FUNCTION update_updated_at()
+                    RETURNS TRIGGER AS $$
+                    BEGIN
+                        NEW.updated_at = CURRENT_TIMESTAMP;
+                        RETURN NEW;
+                    END;
+                    $$ LANGUAGE plpgsql;
 
-                CREATE TRIGGER update_clips_updated_at
-                BEFORE UPDATE ON clips
-                FOR EACH ROW
-                EXECUTE FUNCTION update_updated_at();
+                    CREATE TRIGGER update_clips_updated_at
+                    BEFORE UPDATE ON clips
+                    FOR EACH ROW
+                    EXECUTE FUNCTION update_updated_at();
 
-                CREATE INDEX idx_clips_user_id ON clips(user_id);
-                CREATE INDEX idx_clips_timestamp ON clips(timestamp);
-                """
-                cursor.execute(create_table_query)
-                conn.commit()
-                print("Created table clips with indexes")
+                    CREATE INDEX idx_clips_user_id ON clips(user_id);
+                    CREATE INDEX idx_clips_timestamp ON clips(timestamp);
+                    """
+                    cursor.execute(create_table_query)
+                    conn.commit()
+                    print("Created table clips with indexes")
 
-            while not found_old_post:
-                result = await get_user_clips(session, access_key, user_id, next_page_id)
+                while not found_old_post:
+                    result = await get_user_clips(session, access_key, user_id, next_page_id)
 
-                if isinstance(result, dict):
-                    print(f"\nProcessing data from API for user {user_id} (Page {page_number})")
+                    if isinstance(result, dict):
+                        print(f"\nProcessing data from API for user {user_id} (Page {page_number})")
 
-                    save_json_to_file(result, user_id, page_number)
+                        save_json_to_file(result, user_id, page_number)
 
-                    # Collect posts for processing
-                    for item in result['response']['items']:
-                        post_data = item['media']
-                        if str(post_data['user']['pk']) in allowed_user_ids:
-                            posts_to_process.append(post_data)
+                        # Collect posts for processing
+                        for item in result['response']['items']:
+                            post_data = item['media']
+                            if str(post_data['user']['pk']) in allowed_user_ids:
+                                posts_to_process.append(post_data)
+                            else:
+                                print(f"Skipping post {post_data['pk']} from user {post_data['user']['pk']} (not in allowed user list)")
+
+                        old_timestamp = find_old_timestamp(result)
+                        if old_timestamp:
+                            post_time = unix_to_utc(old_timestamp)
+                            print(f"Found a post older than {DAYS_TO_LOOK_BACK} days for user {user_id}. Taken at: {post_time}")
+                            found_old_post = True
                         else:
-                            print(f"Skipping post {post_data['pk']} from user {post_data['user']['pk']} (not in allowed user list)")
+                            print(f"No posts older than {DAYS_TO_LOOK_BACK} days found on this page for user {user_id}.")
 
-                    old_timestamp = find_old_timestamp(result)
-                    if old_timestamp:
-                        post_time = unix_to_utc(old_timestamp)
-                        print(f"Found a post older than {DAYS_TO_LOOK_BACK} days for user {user_id}. Taken at: {post_time}")
-                        found_old_post = True
+                        next_page_id = result.get("next_page_id")
+
+                        if found_old_post or not next_page_id:
+                            print(f"Stopping pagination for user {user_id}.")
+                            break
+
+                        page_number += 1
                     else:
-                        print(f"No posts older than {DAYS_TO_LOOK_BACK} days found on this page for user {user_id}.")
-
-                    next_page_id = result.get("next_page_id")
-
-                    if found_old_post or not next_page_id:
-                        print(f"Stopping pagination for user {user_id}.")
+                        print(f"An error occurred for user {user_id}: {result}")
                         break
 
-                    page_number += 1
-                else:
-                    print(f"An error occurred for user {user_id}: {result}")
-                    break
+                print(f"Total pages fetched for user {user_id}: {page_number}")
+                print(f"Found {len(posts_to_process)} posts to process for user {user_id}")
+                print("Inserting posts into database...")
 
-            print(f"Total pages fetched for user {user_id}: {page_number}")
-            print(f"Found {len(posts_to_process)} posts to process for user {user_id}")
-            print("Inserting posts into database...")
+                # Process posts in batches (silently)
+                for post_data in posts_to_process:
+                    await insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id)
+                    
+                print(f"Successfully inserted {len(posts_to_process)} posts into database")
 
-            # Process posts in batches (silently)
-            for post_data in posts_to_process:
-                await insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id)
-                
-            print(f"Successfully inserted {len(posts_to_process)} posts into database")
+            finally:
+                cursor.close()
 
-        finally:
-            cursor.close()
+def init_db_pool():
+    """Initialize the database connection pool"""
+    global db_pool
+    try:
+        db_pool = psycopg2.pool.SimpleConnectionPool(
+            MIN_POOL_SIZE,
+            MAX_POOL_SIZE,
+            **DB_CONFIG,
+            keepalives=1,
+            keepalives_idle=DB_KEEPALIVE_INTERVAL,
+            keepalives_interval=DB_KEEPALIVE_INTERVAL,
+            keepalives_count=5
+        )
+        print(f"Created connection pool with {MIN_POOL_SIZE} to {MAX_POOL_SIZE} connections")
+    except psycopg2.Error as e:
+        print(f"Error creating connection pool: {e}")
+        raise
 
-@contextmanager
-def get_db_connection():
-    """Context manager for database connections with retry logic"""
-    conn = None
-    for attempt in range(MAX_DB_RETRIES):
-        try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            yield conn
-            return
-        except psycopg2.OperationalError as e:
-            if attempt == MAX_DB_RETRIES - 1:  # Last attempt
-                print(f"Failed to connect to database after {MAX_DB_RETRIES} attempts")
-                raise  # Re-raise the last exception
-            print(f"Database connection attempt {attempt + 1} failed, retrying in {DB_RETRY_DELAY} seconds...")
-            time.sleep(DB_RETRY_DELAY)
-    if conn:
-        conn.close()
+def cleanup_db_pool():
+    """Clean up the database connection pool"""
+    global db_pool
+    if db_pool:
+        db_pool.closeall()
+        print("Closed all database connections in the pool")
 
 async def main(user_ids):
     access_key = os.environ['HAPI_KEY']
-
+    
     print(f"Scraping clips from the IDs: {', '.join(user_ids)}")
     print(f"Timeframe: Last {DAYS_TO_LOOK_BACK} days")
     print(f"Using access key: {access_key[:5]}...{access_key[-5:]}")
     print(f"Using database: {DB_CONFIG['dbname']} on host: {DB_CONFIG['host']}")
 
+    # Initialize the connection pool
+    init_db_pool()
+    
+    # Create semaphore for limiting concurrent DB operations
+    semaphore = asyncio.Semaphore(DB_SEMAPHORE_LIMIT)
+
     async with aiohttp.ClientSession() as session:
         try:
-            # Only create tasks for clips processing
-            clips_tasks = [process_user(session, access_key, user_id, user_ids) for user_id in user_ids]
+            # Create tasks with semaphore
+            clips_tasks = [
+                process_user(session, access_key, user_id, user_ids, semaphore) 
+                for user_id in user_ids
+            ]
 
             # Run clips tasks concurrently
             await asyncio.gather(*clips_tasks)
         except Exception as e:
             print(f"Error during processing: {str(e)}")
             raise
+        finally:
+            cleanup_db_pool()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process Instagram user clips and profiles.')
