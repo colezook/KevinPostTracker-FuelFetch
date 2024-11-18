@@ -9,10 +9,13 @@ from psycopg2 import sql
 import sys
 import argparse
 from s3_uploader import upload_media_to_s3_and_update_db  # Import only the necessary function
-from profile_stats import process_user_profile
+import time
+from contextlib import contextmanager
 
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 BASE = len(ALPHABET)
+MAX_DB_RETRIES = 3
+DB_RETRY_DELAY = 5  # seconds
 
 def unix_to_utc(timestamp):
     return datetime.fromtimestamp(timestamp, tz=timezone.utc)
@@ -99,9 +102,7 @@ async def insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id):
 
     # First check if post exists and get its current URLs
     cursor.execute(
-        sql.SQL("SELECT video_url, cover_url FROM {} WHERE post_id = %s").format(
-            sql.Identifier(f"clips_{user_id}")
-        ),
+        "SELECT video_url, cover_url FROM clips WHERE post_id = %s",
         [post_data['pk']]
     )
     existing_urls = cursor.fetchone()
@@ -142,45 +143,48 @@ async def insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id):
         instagram_url                                               # url
     )
 
-    try:
-        query = sql.SQL("""
-            INSERT INTO {table} (
-                user_id, post_id, username, caption, play_count, comment_count, 
-                like_count, save_count, share_count, video_url, cover_url, timestamp, url
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-            )
-            ON CONFLICT (post_id) DO UPDATE SET
-                play_count = EXCLUDED.play_count,
-                comment_count = EXCLUDED.comment_count,
-                like_count = EXCLUDED.like_count,
-                save_count = EXCLUDED.save_count,
-                share_count = EXCLUDED.share_count,
-                video_url = CASE 
-                    WHEN {table}.video_url IS NULL OR NOT {table}.video_url LIKE %s
-                    THEN EXCLUDED.video_url
-                    ELSE {table}.video_url
-                END,
-                cover_url = CASE 
-                    WHEN {table}.cover_url IS NULL OR NOT {table}.cover_url LIKE %s
-                    THEN EXCLUDED.cover_url
-                    ELSE {table}.cover_url
-                END,
-                updated_at = CURRENT_TIMESTAMP
-        """).format(
-            table=sql.Identifier(f"clips_{user_id}")
-        )
-        
-        # Add the cloudfront pattern to the values tuple for the LIKE conditions
-        cloudfront_pattern = 'https://d16ptydiypnzmb.cloudfront.net%'
-        all_values = values + (cloudfront_pattern, cloudfront_pattern)
-        
-        cursor.execute(query, all_values)
-        conn.commit()
-    except Exception as e:
-        print(f"Error inserting post {post_data['pk']}: {str(e)}")
-        print(f"Values: {values}")
-        raise
+    # Add retry logic for database operations
+    for attempt in range(MAX_DB_RETRIES):
+        try:
+            query = """
+                INSERT INTO clips (
+                    user_id, post_id, username, caption, play_count, comment_count, 
+                    like_count, save_count, share_count, video_url, cover_url, timestamp, url
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (post_id) DO UPDATE SET
+                    play_count = EXCLUDED.play_count,
+                    comment_count = EXCLUDED.comment_count,
+                    like_count = EXCLUDED.like_count,
+                    save_count = EXCLUDED.save_count,
+                    share_count = EXCLUDED.share_count,
+                    video_url = CASE 
+                        WHEN clips.video_url IS NULL OR NOT clips.video_url LIKE %s
+                        THEN EXCLUDED.video_url
+                        ELSE clips.video_url
+                    END,
+                    cover_url = CASE 
+                        WHEN clips.cover_url IS NULL OR NOT clips.cover_url LIKE %s
+                        THEN EXCLUDED.cover_url
+                        ELSE clips.cover_url
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+            """
+            
+            # Add the cloudfront pattern to the values tuple for the LIKE conditions
+            cloudfront_pattern = 'https://d16ptydiypnzmb.cloudfront.net%'
+            all_values = values + (cloudfront_pattern, cloudfront_pattern)
+            
+            cursor.execute(query, all_values)
+            conn.commit()
+            return  # Success
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            if attempt == MAX_DB_RETRIES - 1:
+                print(f"Failed to insert post {post_data['pk']} after {MAX_DB_RETRIES} attempts")
+                raise
+            print(f"Database operation attempt {attempt + 1} failed, retrying in {DB_RETRY_DELAY} seconds...")
+            time.sleep(DB_RETRY_DELAY)
 
 async def process_user(session, access_key, user_id, allowed_user_ids):
     print(f"Processing user ID: {user_id}")
@@ -189,126 +193,135 @@ async def process_user(session, access_key, user_id, allowed_user_ids):
     found_old_post = False
     posts_to_process = []  # Store posts for batch processing
 
-    conn = psycopg2.connect(**DB_CONFIG)
-    cursor = conn.cursor()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        try:
+            # Check if the clips table exists
+            cursor.execute("SELECT to_regclass('public.clips')")
+            table_exists = cursor.fetchone()[0]
 
-    try:
-        # Check if the table exists for this user_id
-        cursor.execute(f"SELECT to_regclass('public.clips_{user_id}')")
-        table_exists = cursor.fetchone()[0]
+            if not table_exists:
+                # Create the table if it doesn't exist
+                create_table_query = """
+                CREATE TABLE clips (
+                    post_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+                    play_count INTEGER,
+                    like_count INTEGER,
+                    comment_count INTEGER,
+                    save_count INTEGER,
+                    share_count INTEGER,
+                    url TEXT,
+                    video_url TEXT,
+                    cover_url TEXT,
+                    caption TEXT,
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
 
-        if not table_exists:
-            # Create the table if it doesn't exist
-            create_table_query = f"""
-            CREATE TABLE clips_{user_id} (
-                post_id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                username TEXT NOT NULL,
-                timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-                play_count INTEGER,
-                like_count INTEGER,
-                comment_count INTEGER,
-                save_count INTEGER,
-                share_count INTEGER,
-                url TEXT,
-                video_url TEXT,
-                cover_url TEXT,
-                caption TEXT,
-                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
+                CREATE OR REPLACE FUNCTION update_updated_at()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    NEW.updated_at = CURRENT_TIMESTAMP;
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql;
 
-            CREATE OR REPLACE FUNCTION update_updated_at()
-            RETURNS TRIGGER AS $$
-            BEGIN
-                NEW.updated_at = CURRENT_TIMESTAMP;
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql;
+                CREATE TRIGGER update_clips_updated_at
+                BEFORE UPDATE ON clips
+                FOR EACH ROW
+                EXECUTE FUNCTION update_updated_at();
 
-            CREATE TRIGGER update_clips_{user_id}_updated_at
-            BEFORE UPDATE ON clips_{user_id}
-            FOR EACH ROW
-            EXECUTE FUNCTION update_updated_at();
-            """
-            cursor.execute(create_table_query)
-            conn.commit()
-            print(f"Created table clips_{user_id}")
+                CREATE INDEX idx_clips_user_id ON clips(user_id);
+                CREATE INDEX idx_clips_timestamp ON clips(timestamp);
+                """
+                cursor.execute(create_table_query)
+                conn.commit()
+                print("Created table clips with indexes")
 
-        while not found_old_post:
-            result = await get_user_clips(session, access_key, user_id, next_page_id)
+            while not found_old_post:
+                result = await get_user_clips(session, access_key, user_id, next_page_id)
 
-            if isinstance(result, dict):
-                print(f"\nProcessing data from API for user {user_id} (Page {page_number})")
+                if isinstance(result, dict):
+                    print(f"\nProcessing data from API for user {user_id} (Page {page_number})")
 
-                save_json_to_file(result, user_id, page_number)
+                    save_json_to_file(result, user_id, page_number)
 
-                # Collect posts for processing
-                for item in result['response']['items']:
-                    post_data = item['media']
-                    if str(post_data['user']['pk']) in allowed_user_ids:
-                        posts_to_process.append(post_data)
+                    # Collect posts for processing
+                    for item in result['response']['items']:
+                        post_data = item['media']
+                        if str(post_data['user']['pk']) in allowed_user_ids:
+                            posts_to_process.append(post_data)
+                        else:
+                            print(f"Skipping post {post_data['pk']} from user {post_data['user']['pk']} (not in allowed user list)")
+
+                    old_timestamp = find_old_timestamp(result)
+                    if old_timestamp:
+                        post_time = unix_to_utc(old_timestamp)
+                        print(f"Found a post older than {DAYS_TO_LOOK_BACK} days for user {user_id}. Taken at: {post_time}")
+                        found_old_post = True
                     else:
-                        print(f"Skipping post {post_data['pk']} from user {post_data['user']['pk']} (not in allowed user list)")
+                        print(f"No posts older than {DAYS_TO_LOOK_BACK} days found on this page for user {user_id}.")
 
-                old_timestamp = find_old_timestamp(result)
-                if old_timestamp:
-                    post_time = unix_to_utc(old_timestamp)
-                    print(f"Found a post older than {DAYS_TO_LOOK_BACK} days for user {user_id}. Taken at: {post_time}")
-                    found_old_post = True
+                    next_page_id = result.get("next_page_id")
+
+                    if found_old_post or not next_page_id:
+                        print(f"Stopping pagination for user {user_id}.")
+                        break
+
+                    page_number += 1
                 else:
-                    print(f"No posts older than {DAYS_TO_LOOK_BACK} days found on this page for user {user_id}.")
-
-                next_page_id = result.get("next_page_id")
-
-                if found_old_post or not next_page_id:
-                    print(f"Stopping pagination for user {user_id}.")
+                    print(f"An error occurred for user {user_id}: {result}")
                     break
 
-                page_number += 1
-            else:
-                print(f"An error occurred for user {user_id}: {result}")
-                break
+            print(f"Total pages fetched for user {user_id}: {page_number}")
+            print(f"Found {len(posts_to_process)} posts to process for user {user_id}")
+            print("Inserting posts into database...")
 
-        print(f"Total pages fetched for user {user_id}: {page_number}")
-        print(f"Found {len(posts_to_process)} posts to process for user {user_id}")
-        print("Inserting posts into database...")
+            # Process posts in batches (silently)
+            for post_data in posts_to_process:
+                await insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id)
+                
+            print(f"Successfully inserted {len(posts_to_process)} posts into database")
 
-        # Process posts in batches (silently)
-        for post_data in posts_to_process:
-            await insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id)
-            
-        print(f"Successfully inserted {len(posts_to_process)} posts into database")
-            
-        # After processing all posts, upload media to S3 and update DB with progress tracking
-        print(f"\nStarting media upload process for {len(posts_to_process)} posts from user {user_id}")
-        await upload_media_to_s3_and_update_db(
-            conn, 
-            cursor, 
-            user_id,
-            total_posts=len(posts_to_process)
-        )
+        finally:
+            cursor.close()
 
-    finally:
-        cursor.close()
+@contextmanager
+def get_db_connection():
+    """Context manager for database connections with retry logic"""
+    conn = None
+    for attempt in range(MAX_DB_RETRIES):
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            yield conn
+            return
+        except psycopg2.OperationalError as e:
+            if attempt == MAX_DB_RETRIES - 1:  # Last attempt
+                print(f"Failed to connect to database after {MAX_DB_RETRIES} attempts")
+                raise  # Re-raise the last exception
+            print(f"Database connection attempt {attempt + 1} failed, retrying in {DB_RETRY_DELAY} seconds...")
+            time.sleep(DB_RETRY_DELAY)
+    if conn:
         conn.close()
 
 async def main(user_ids):
     access_key = os.environ['HAPI_KEY']
 
-    print(f"Scraping clips and profiles from the IDs: {', '.join(user_ids)}")
+    print(f"Scraping clips from the IDs: {', '.join(user_ids)}")
     print(f"Timeframe: Last {DAYS_TO_LOOK_BACK} days")
     print(f"Using access key: {access_key[:5]}...{access_key[-5:]}")
     print(f"Using database: {DB_CONFIG['dbname']} on host: {DB_CONFIG['host']}")
 
     async with aiohttp.ClientSession() as session:
         try:
-            # Create tasks for both clips and profile processing
+            # Only create tasks for clips processing
             clips_tasks = [process_user(session, access_key, user_id, user_ids) for user_id in user_ids]
-            profile_tasks = [process_user_profile(user_id) for user_id in user_ids]
 
-            # Run all tasks concurrently
-            await asyncio.gather(*clips_tasks, *profile_tasks)
+            # Run clips tasks concurrently
+            await asyncio.gather(*clips_tasks)
         except Exception as e:
             print(f"Error during processing: {str(e)}")
             raise

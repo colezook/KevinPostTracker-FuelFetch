@@ -1,0 +1,349 @@
+Created connection pool with 3 to 20 connections
+Scraping clips from the IDs: 58916637091, 62584671960, 62582654993, 56993024596, 60079583626, 64026646834, 60164717043, 47411093205, 48871716256, 47342895164, 47115255959, 64582096899, 64385655319, 64041068777, 64393485278, 64241648371, 69417922840, 64568107636, 59184886264, 58972024942, 69423074382, 64400068675, 64174919342, 60612580669, 60418301335, 62752303281, 61120897001, 64402276598, 68919961665, 61002144457, 60343660883, 68854357506, 60604355011, 60173887870, 63060704607, 60888060200, 60488039622, 54983805051, 60558470794, 59086230185, 65715085597, 46054970930, 61837194708, 48694298932, 60670828469, 47734694486, 48787952428, 60805158025, 56080813489, 68907499258, 68775834543, 55000706515, 48272772540, 60450538986, 68922115931, 68346828483, 285659578, 68713830537, 68850837860, 48144493470, 56542482786, 69004286127, 55456477801, 49018516078, 498478492, 48542658776, 60198605217, 55746750682, 58889959053, 64735118312, 68816751468, 56020117830, 47238730159, 65123595268, 65902509536, 48031270577, 59444554120, 572736748, 60070087677, 7690789389, 41940187, 389839482, 494261252, 285115958, 66358113469, 255258901, 257914971, 56364616975, 69426886574, 65903006417, 48644766387, 442610255, 61412873536, 61166346053, 65946740681, 56703878423, 55883121445, 60989155125, 69427589827, 365086782, 60500944535, 59397409435, 65224054578, 9435331805
+Making request for user 58916637091 with params: {'user_id': '58916637091'}
+Making request for user 62584671960 with params: {'user_id': '62584671960'}
+Making request for user 62582654993 with params: {'user_id': '62582654993'}
+Response status for user 62582654993: 200
+Response status for user 62584671960: 200
+No valid items found for user 62582654993
+Response status for user 58916637091: 200
+No valid items found for user 62584671960
+No valid items found for user 58916637091
+Completed batch of users 1 to 3
+Making request for user 56993024596 with params: {'user_id': '56993024596'}
+Making request for user 60079583626 with params: {'user_id': '60079583626'}
+Making request for user 64026646834 with params: {'user_id': '64026646834'}
+Response status for user 56993024596: 200
+No valid items found for user 56993024596
+Response status for user 60079583626: 200
+No valid items found for user 60079583626
+Response status for user 64026646834: 200
+No valid items found for user 64026646834
+Completed batch of users 4 to 6
+Making request for user 60164717043 with params: {'user_id': '60164717043'}
+Making request for user 47411093205 with params: {'user_id': '47411093205'}
+Making request for user 48871716256 with params: {'user_id': '48871716256'}
+Response status for user 60164717043: 200
+Response status for user 48871716256: 200
+No valid items found for user 60164717043
+No valid items found for user 48871716256
+Response status for user 47411093205: 200
+No valid items found for user 47411093205
+Completed batch of users 7 to 9
+Making request for user 47342895164 with params: {'user_id': '47342895164'}
+Making request for user 47115255959 with params: {'user_id': '47115255959'}
+Making request for user 64582096899 with params: {'user_id': '64582096899'}
+Response status for user 64582096899: 200
+No valid items found for user 64582096899
+Response status for user 47115255959: 200
+Response status for user 47342895164: 200
+No valid items found for user 47115255959
+No valid items found for user 47342895164
+Completed batch of users 10 to 12
+Making request for user 64385655319 with params: {'user_id': '64385655319'}
+Making request for user 64041068777 with params: {'user_id': '64041068777'}
+Making request for user 64393485278 with params: {'user_id': '64393485278'}
+Response status for user 64385655319: 200
+Response status for user 64393485278: 200
+No valid items found for user 64385655319
+No valid items found for user 64393485278
+Response status for user 64041068777: 200
+No valid items found for user 64041068777
+Completed batch of users 13 to 15
+Making request for user 64241648371 with params: {'user_id': '64241648371'}
+Making request for user 69417922840 with params: {'user_id': '69417922840'}
+Making request for user 64568107636 with params: {'user_id': '64568107636'}
+Response status for user 69417922840: 200
+No valid items found for user 69417922840
+Response status for user 64568107636: 200
+No valid items found for user 64568107636
+Response status for user 64241648371: 200
+No valid items found for user 64241648371
+Completed batch of users 16 to 18
+Making request for user 59184886264 with params: {'user_id': '59184886264'}
+Making request for user 58972024942 with params: {'user_id': '58972024942'}
+Making request for user 69423074382 with params: {'user_id': '69423074382'}
+Response status for user 59184886264: 200
+Response status for user 58972024942: 200
+No valid items found for user 58972024942
+No valid items found for user 59184886264
+Response status for user 69423074382: 200
+No valid items found for user 69423074382
+Completed batch of users 19 to 21
+Making request for user 64400068675 with params: {'user_id': '64400068675'}
+Making request for user 64174919342 with params: {'user_id': '64174919342'}
+Making request for user 60612580669 with params: {'user_id': '60612580669'}
+Response status for user 64400068675: 200
+No valid items found for user 64400068675
+Response status for user 60612580669: 200
+No valid items found for user 60612580669
+Response status for user 64174919342: 200
+No valid items found for user 64174919342
+Completed batch of users 22 to 24
+Making request for user 60418301335 with params: {'user_id': '60418301335'}
+Making request for user 62752303281 with params: {'user_id': '62752303281'}
+Making request for user 61120897001 with params: {'user_id': '61120897001'}
+Response status for user 60418301335: 200
+Response status for user 62752303281: 200
+No valid items found for user 60418301335
+Response status for user 61120897001: 200
+No valid items found for user 62752303281
+No valid items found for user 61120897001
+Completed batch of users 25 to 27
+Making request for user 64402276598 with params: {'user_id': '64402276598'}
+Making request for user 68919961665 with params: {'user_id': '68919961665'}
+Making request for user 61002144457 with params: {'user_id': '61002144457'}
+Response status for user 64402276598: 200
+No valid items found for user 64402276598
+Response status for user 68919961665: 200
+No valid items found for user 68919961665
+Response status for user 61002144457: 200
+No valid items found for user 61002144457
+Completed batch of users 28 to 30
+Making request for user 60343660883 with params: {'user_id': '60343660883'}
+Making request for user 68854357506 with params: {'user_id': '68854357506'}
+Making request for user 60604355011 with params: {'user_id': '60604355011'}
+Response status for user 60604355011: 200
+No valid items found for user 60604355011
+Response status for user 68854357506: 200
+No valid items found for user 68854357506
+Response status for user 60343660883: 200
+No valid items found for user 60343660883
+Completed batch of users 31 to 33
+Making request for user 60173887870 with params: {'user_id': '60173887870'}
+Making request for user 63060704607 with params: {'user_id': '63060704607'}
+Making request for user 60888060200 with params: {'user_id': '60888060200'}
+Response status for user 60173887870: 200
+No valid items found for user 60173887870
+Response status for user 63060704607: 200
+Response status for user 60888060200: 200
+No valid items found for user 60888060200
+No valid items found for user 63060704607
+Completed batch of users 34 to 36
+Making request for user 60488039622 with params: {'user_id': '60488039622'}
+Making request for user 54983805051 with params: {'user_id': '54983805051'}
+Making request for user 60558470794 with params: {'user_id': '60558470794'}
+Response status for user 60488039622: 200
+No valid items found for user 60488039622
+Response status for user 60558470794: 200
+No valid items found for user 60558470794
+Response status for user 54983805051: 200
+No valid items found for user 54983805051
+Completed batch of users 37 to 39
+Making request for user 59086230185 with params: {'user_id': '59086230185'}
+Making request for user 65715085597 with params: {'user_id': '65715085597'}
+Making request for user 46054970930 with params: {'user_id': '46054970930'}
+Response status for user 46054970930: 200
+No valid items found for user 46054970930
+Response status for user 59086230185: 200
+No valid items found for user 59086230185
+Response status for user 65715085597: 200
+No valid items found for user 65715085597
+Completed batch of users 40 to 42
+Making request for user 61837194708 with params: {'user_id': '61837194708'}
+Making request for user 48694298932 with params: {'user_id': '48694298932'}
+Making request for user 60670828469 with params: {'user_id': '60670828469'}
+Response status for user 48694298932: 200
+No valid items found for user 48694298932
+Response status for user 61837194708: 200
+Response status for user 60670828469: 200
+No valid items found for user 61837194708
+No valid items found for user 60670828469
+Completed batch of users 43 to 45
+Making request for user 47734694486 with params: {'user_id': '47734694486'}
+Making request for user 48787952428 with params: {'user_id': '48787952428'}
+Making request for user 60805158025 with params: {'user_id': '60805158025'}
+Response status for user 48787952428: 200
+Response status for user 60805158025: 200
+No valid items found for user 48787952428
+Response status for user 47734694486: 200
+No valid items found for user 60805158025
+No valid items found for user 47734694486
+Completed batch of users 46 to 48
+Making request for user 56080813489 with params: {'user_id': '56080813489'}
+Making request for user 68907499258 with params: {'user_id': '68907499258'}
+Making request for user 68775834543 with params: {'user_id': '68775834543'}
+Response status for user 68775834543: 200
+No valid items found for user 68775834543
+Response status for user 56080813489: 200
+Response status for user 68907499258: 200
+No valid items found for user 68907499258
+No valid items found for user 56080813489
+Completed batch of users 49 to 51
+Making request for user 55000706515 with params: {'user_id': '55000706515'}
+Making request for user 48272772540 with params: {'user_id': '48272772540'}
+Making request for user 60450538986 with params: {'user_id': '60450538986'}
+Response status for user 55000706515: 200
+Response status for user 48272772540: 200
+No valid items found for user 55000706515
+No valid items found for user 48272772540
+Response status for user 60450538986: 200
+No valid items found for user 60450538986
+Completed batch of users 52 to 54
+Making request for user 68922115931 with params: {'user_id': '68922115931'}
+Making request for user 68346828483 with params: {'user_id': '68346828483'}
+Making request for user 285659578 with params: {'user_id': '285659578'}
+Response status for user 68346828483: 200
+No valid items found for user 68346828483
+Response status for user 285659578: 200
+No valid items found for user 285659578
+Response status for user 68922115931: 200
+No valid items found for user 68922115931
+Completed batch of users 55 to 57
+Making request for user 68713830537 with params: {'user_id': '68713830537'}
+Making request for user 68850837860 with params: {'user_id': '68850837860'}
+Making request for user 48144493470 with params: {'user_id': '48144493470'}
+Response status for user 68850837860: 200
+No valid items found for user 68850837860
+Response status for user 48144493470: 200
+No valid items found for user 48144493470
+Response status for user 68713830537: 200
+No valid items found for user 68713830537
+Completed batch of users 58 to 60
+Making request for user 56542482786 with params: {'user_id': '56542482786'}
+Making request for user 69004286127 with params: {'user_id': '69004286127'}
+Making request for user 55456477801 with params: {'user_id': '55456477801'}
+Response status for user 56542482786: 200
+Response status for user 55456477801: 200
+No valid items found for user 56542482786
+No valid items found for user 55456477801
+Response status for user 69004286127: 200
+No valid items found for user 69004286127
+Completed batch of users 61 to 63
+Making request for user 49018516078 with params: {'user_id': '49018516078'}
+Making request for user 498478492 with params: {'user_id': '498478492'}
+Making request for user 48542658776 with params: {'user_id': '48542658776'}
+Response status for user 49018516078: 200
+No valid items found for user 49018516078
+Response status for user 498478492: 200
+No valid items found for user 498478492
+Response status for user 48542658776: 200
+No valid items found for user 48542658776
+Completed batch of users 64 to 66
+Making request for user 60198605217 with params: {'user_id': '60198605217'}
+Making request for user 55746750682 with params: {'user_id': '55746750682'}
+Making request for user 58889959053 with params: {'user_id': '58889959053'}
+Response status for user 55746750682: 200
+No valid items found for user 55746750682
+Response status for user 58889959053: 200
+No valid items found for user 58889959053
+Response status for user 60198605217: 200
+No valid items found for user 60198605217
+Completed batch of users 67 to 69
+Making request for user 64735118312 with params: {'user_id': '64735118312'}
+Making request for user 68816751468 with params: {'user_id': '68816751468'}
+Making request for user 56020117830 with params: {'user_id': '56020117830'}
+Response status for user 64735118312: 200
+No valid items found for user 64735118312
+Response status for user 68816751468: 200
+No valid items found for user 68816751468
+Response status for user 56020117830: 200
+No valid items found for user 56020117830
+Completed batch of users 70 to 72
+Making request for user 47238730159 with params: {'user_id': '47238730159'}
+Making request for user 65123595268 with params: {'user_id': '65123595268'}
+Making request for user 65902509536 with params: {'user_id': '65902509536'}
+Response status for user 47238730159: 200
+No valid items found for user 47238730159
+Response status for user 65902509536: 200
+Response status for user 65123595268: 200
+No valid items found for user 65123595268
+No valid items found for user 65902509536
+Completed batch of users 73 to 75
+Making request for user 48031270577 with params: {'user_id': '48031270577'}
+Making request for user 59444554120 with params: {'user_id': '59444554120'}
+Making request for user 572736748 with params: {'user_id': '572736748'}
+Response status for user 572736748: 200
+No valid items found for user 572736748
+Response status for user 48031270577: 200
+No valid items found for user 48031270577
+Response status for user 59444554120: 200
+No valid items found for user 59444554120
+Completed batch of users 76 to 78
+Making request for user 60070087677 with params: {'user_id': '60070087677'}
+Making request for user 7690789389 with params: {'user_id': '7690789389'}
+Making request for user 41940187 with params: {'user_id': '41940187'}
+Response status for user 60070087677: 200
+Response status for user 41940187: 200
+No valid items found for user 60070087677
+No valid items found for user 41940187
+Response status for user 7690789389: 200
+No valid items found for user 7690789389
+Completed batch of users 79 to 81
+Making request for user 389839482 with params: {'user_id': '389839482'}
+Making request for user 494261252 with params: {'user_id': '494261252'}
+Making request for user 285115958 with params: {'user_id': '285115958'}
+Response status for user 389839482: 200
+Response status for user 494261252: 200
+No valid items found for user 494261252
+No valid items found for user 389839482
+Response status for user 285115958: 200
+No valid items found for user 285115958
+Completed batch of users 82 to 84
+Making request for user 66358113469 with params: {'user_id': '66358113469'}
+Making request for user 255258901 with params: {'user_id': '255258901'}
+Making request for user 257914971 with params: {'user_id': '257914971'}
+Response status for user 66358113469: 200
+No valid items found for user 66358113469
+Response status for user 255258901: 200
+No valid items found for user 255258901
+Response status for user 257914971: 200
+No valid items found for user 257914971
+Completed batch of users 85 to 87
+Making request for user 56364616975 with params: {'user_id': '56364616975'}
+Making request for user 69426886574 with params: {'user_id': '69426886574'}
+Making request for user 65903006417 with params: {'user_id': '65903006417'}
+Response status for user 69426886574: 200
+No valid items found for user 69426886574
+Response status for user 56364616975: 200
+No valid items found for user 56364616975
+Response status for user 65903006417: 200
+No valid items found for user 65903006417
+Completed batch of users 88 to 90
+Making request for user 48644766387 with params: {'user_id': '48644766387'}
+Making request for user 442610255 with params: {'user_id': '442610255'}
+Making request for user 61412873536 with params: {'user_id': '61412873536'}
+Response status for user 48644766387: 200
+Response status for user 61412873536: 200
+No valid items found for user 48644766387
+No valid items found for user 61412873536
+Response status for user 442610255: 200
+No valid items found for user 442610255
+Completed batch of users 91 to 93
+Making request for user 61166346053 with params: {'user_id': '61166346053'}
+Making request for user 65946740681 with params: {'user_id': '65946740681'}
+Making request for user 56703878423 with params: {'user_id': '56703878423'}
+Response status for user 56703878423: 200
+Response status for user 61166346053: 200
+No valid items found for user 56703878423
+No valid items found for user 61166346053
+Response status for user 65946740681: 200
+No valid items found for user 65946740681
+Completed batch of users 94 to 96
+Making request for user 55883121445 with params: {'user_id': '55883121445'}
+Making request for user 60989155125 with params: {'user_id': '60989155125'}
+Making request for user 69427589827 with params: {'user_id': '69427589827'}
+Response status for user 60989155125: 200
+No valid items found for user 60989155125
+Response status for user 55883121445: 200
+No valid items found for user 55883121445
+Response status for user 69427589827: 200
+No valid items found for user 69427589827
+Completed batch of users 97 to 99
+Making request for user 365086782 with params: {'user_id': '365086782'}
+Making request for user 60500944535 with params: {'user_id': '60500944535'}
+Making request for user 59397409435 with params: {'user_id': '59397409435'}
+Response status for user 59397409435: 200
+No valid items found for user 59397409435
+Response status for user 60500944535: 200
+Response status for user 365086782: 200
+No valid items found for user 365086782
+No valid items found for user 60500944535
+Completed batch of users 100 to 102
+Making request for user 65224054578 with params: {'user_id': '65224054578'}
+Making request for user 9435331805 with params: {'user_id': '9435331805'}
+Response status for user 9435331805: 404
+No more results for user 9435331805
+Response status for user 65224054578: 200
+No valid items found for user 65224054578
+Completed batch of users 103 to 104
