@@ -109,7 +109,7 @@ USER_IDS = [
 
 
 # Number of days to look back for old posts
-DAYS_TO_LOOK_BACK = 13
+DAYS_TO_LOOK_BACK = 180
 
 # You can add other configuration variables here if needed
 API_BASE_URL = "https://api.hikerapi.com/v2/user/clips"

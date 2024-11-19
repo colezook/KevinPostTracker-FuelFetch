@@ -16,12 +16,12 @@ from psycopg2.pool import PoolError
 
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 BASE = len(ALPHABET)
-MAX_DB_RETRIES = 5
+MAX_DB_RETRIES = 10
 DB_RETRY_DELAY = 10
-DB_KEEPALIVE_INTERVAL = 30
+DB_KEEPALIVE_INTERVAL = 60
 MIN_POOL_SIZE = 3
 MAX_POOL_SIZE = 20
-POOL_TIMEOUT = 30
+POOL_TIMEOUT = 60
 
 # Add semaphore for limiting concurrent DB operations
 DB_SEMAPHORE_LIMIT = 5  # Adjust based on your MAX_POOL_SIZE
@@ -107,96 +107,115 @@ def find_old_timestamp(data):
     return None
 
 async def insert_post_data(conn, cursor, post_data, allowed_user_ids, user_id):
+    """Insert post data with improved error handling"""
     # Check if the post's user_id is in the allowed_user_ids list
     if str(post_data['user']['pk']) not in allowed_user_ids:
         print(f"Skipping post {post_data['pk']} from user {post_data['user']['pk']} (not in allowed user list)")
         return
 
-    # First check if post exists and get its current URLs
-    cursor.execute(
-        "SELECT video_url, cover_url FROM clips WHERE post_id = %s",
-        [post_data['pk']]
-    )
-    existing_urls = cursor.fetchone()
+    try:
+        # First check if post exists and get its current URLs
+        cursor.execute(
+            "SELECT video_url, cover_url FROM clips WHERE post_id = %s",
+            [post_data['pk']]
+        )
+        existing_urls = cursor.fetchone()
 
-    # Keep existing Cloudfront URLs if they exist
-    video_url = post_data.get('video_url')
-    cover_url = post_data.get('thumbnail_url')
-    
-    if existing_urls:
-        existing_video_url, existing_cover_url = existing_urls
-        if existing_video_url and existing_video_url.startswith('https://d16ptydiypnzmb.cloudfront.net'):
-            video_url = existing_video_url
-        if existing_cover_url and existing_cover_url.startswith('https://d16ptydiypnzmb.cloudfront.net'):
-            cover_url = existing_cover_url
+        # Keep existing Cloudfront URLs if they exist
+        video_url = post_data.get('video_url')
+        cover_url = post_data.get('thumbnail_url')
+        
+        if existing_urls:
+            existing_video_url, existing_cover_url = existing_urls
+            if existing_video_url and existing_video_url.startswith('https://d16ptydiypnzmb.cloudfront.net'):
+                video_url = existing_video_url
+            if existing_cover_url and existing_cover_url.startswith('https://d16ptydiypnzmb.cloudfront.net'):
+                cover_url = existing_cover_url
 
-    taken_at = post_data.get('taken_at')
-    utc_timestamp = unix_to_utc(taken_at) if taken_at else None
-    
-    url_segment = instagram_id_to_url_segment(post_data['pk'])
-    instagram_url = f"https://www.instagram.com/reel/{url_segment}/"
+        taken_at = post_data.get('taken_at')
+        utc_timestamp = unix_to_utc(taken_at) if taken_at else None
+        
+        url_segment = instagram_id_to_url_segment(post_data['pk'])
+        instagram_url = f"https://www.instagram.com/reel/{url_segment}/"
 
-    caption = post_data.get('caption')
-    caption_text = caption.get('text') if isinstance(caption, dict) else None
+        caption = post_data.get('caption')
+        caption_text = caption.get('text') if isinstance(caption, dict) else None
 
-    values = (
-        post_data['user']['pk'],                                      # user_id
-        post_data['pk'],                                             # post_id
-        post_data['user']['username'],                               # username
-        caption_text,                                                # caption
-        post_data.get('play_count', 0),                             # play_count
-        post_data.get('comment_count', 0),                          # comment_count
-        post_data.get('like_count', 0),                             # like_count
-        post_data.get('save_count') if 'save_count' in post_data else None,  # save_count
-        post_data.get('reshare_count', 0),                          # share_count
-        video_url,                                                   # video_url
-        cover_url,                                                   # cover_url
-        utc_timestamp,                                              # timestamp
-        instagram_url                                               # url
-    )
+        values = (
+            post_data['user']['pk'],                                      # user_id
+            post_data['pk'],                                             # post_id
+            post_data['user']['username'],                               # username
+            caption_text,                                                # caption
+            post_data.get('play_count', 0),                             # play_count
+            post_data.get('comment_count', 0),                          # comment_count
+            post_data.get('like_count', 0),                             # like_count
+            post_data.get('save_count') if 'save_count' in post_data else None,  # save_count
+            post_data.get('reshare_count', 0),                          # share_count
+            video_url,                                                   # video_url
+            cover_url,                                                   # cover_url
+            utc_timestamp,                                              # timestamp
+            instagram_url                                               # url
+        )
 
-    # Add retry logic for database operations
-    for attempt in range(MAX_DB_RETRIES):
-        try:
-            query = """
-                INSERT INTO clips (
-                    user_id, post_id, username, caption, play_count, comment_count, 
-                    like_count, save_count, share_count, video_url, cover_url, timestamp, url
-                ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                )
-                ON CONFLICT (post_id) DO UPDATE SET
-                    play_count = EXCLUDED.play_count,
-                    comment_count = EXCLUDED.comment_count,
-                    like_count = EXCLUDED.like_count,
-                    save_count = EXCLUDED.save_count,
-                    share_count = EXCLUDED.share_count,
-                    video_url = CASE 
-                        WHEN clips.video_url IS NULL OR NOT clips.video_url LIKE %s
-                        THEN EXCLUDED.video_url
-                        ELSE clips.video_url
-                    END,
-                    cover_url = CASE 
-                        WHEN clips.cover_url IS NULL OR NOT clips.cover_url LIKE %s
-                        THEN EXCLUDED.cover_url
-                        ELSE clips.cover_url
-                    END,
-                    updated_at = CURRENT_TIMESTAMP
-            """
-            
-            # Add the cloudfront pattern to the values tuple for the LIKE conditions
-            cloudfront_pattern = 'https://d16ptydiypnzmb.cloudfront.net%'
-            all_values = values + (cloudfront_pattern, cloudfront_pattern)
-            
-            cursor.execute(query, all_values)
-            conn.commit()
-            return  # Success
-        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
-            if attempt == MAX_DB_RETRIES - 1:
-                print(f"Failed to insert post {post_data['pk']} after {MAX_DB_RETRIES} attempts")
-                raise
-            print(f"Database operation attempt {attempt + 1} failed, retrying in {DB_RETRY_DELAY} seconds...")
-            time.sleep(DB_RETRY_DELAY)
+        # Add retry logic for database operations
+        for attempt in range(MAX_DB_RETRIES):
+            try:
+                query = """
+                    INSERT INTO clips (
+                        user_id, post_id, username, caption, play_count, comment_count, 
+                        like_count, save_count, share_count, video_url, cover_url, timestamp, url
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    ON CONFLICT (post_id) DO UPDATE SET
+                        play_count = EXCLUDED.play_count,
+                        comment_count = EXCLUDED.comment_count,
+                        like_count = EXCLUDED.like_count,
+                        save_count = EXCLUDED.save_count,
+                        share_count = EXCLUDED.share_count,
+                        video_url = CASE 
+                            WHEN clips.video_url IS NULL OR NOT clips.video_url LIKE %s
+                            THEN EXCLUDED.video_url
+                            ELSE clips.video_url
+                        END,
+                        cover_url = CASE 
+                            WHEN clips.cover_url IS NULL OR NOT clips.cover_url LIKE %s
+                            THEN EXCLUDED.cover_url
+                            ELSE clips.cover_url
+                        END,
+                        updated_at = CURRENT_TIMESTAMP
+                """
+                
+                # Add the cloudfront pattern to the values tuple for the LIKE conditions
+                cloudfront_pattern = 'https://d16ptydiypnzmb.cloudfront.net%'
+                all_values = values + (cloudfront_pattern, cloudfront_pattern)
+                
+                cursor.execute(query, all_values)
+                conn.commit()
+                return  # Success
+            except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                print(f"Database operation failed (attempt {attempt + 1}): {e}")
+                try:
+                    conn.rollback()
+                except:
+                    pass
+                
+                if attempt == MAX_DB_RETRIES - 1:
+                    print(f"Failed to insert post {post_data['pk']} after {MAX_DB_RETRIES} attempts")
+                    raise
+                
+                # Check if connection is still valid
+                try:
+                    conn.status
+                except (psycopg2.OperationalError, psycopg2.InterfaceError):
+                    print("Connection lost, raising exception to trigger reconnection")
+                    raise
+                
+                print(f"Retrying in {DB_RETRY_DELAY} seconds...")
+                await asyncio.sleep(DB_RETRY_DELAY)
+    except Exception as e:
+        print(f"Error processing post {post_data['pk']}: {str(e)}")
+        raise
 
 @contextmanager
 def get_db_connection():
@@ -206,42 +225,48 @@ def get_db_connection():
     
     for attempt in range(MAX_DB_RETRIES):
         try:
+            # Check if pool is closed and try to reinitialize
+            if db_pool is None or db_pool.closed:
+                init_db_pool()
+
+            # Get connection without trying to unpack
             conn = db_pool.getconn()
             if conn:
                 try:
-                    # Set session characteristics
                     conn.set_session(autocommit=False)
                     conn.set_client_encoding('UTF8')
                     yield conn
                 finally:
-                    # Always return connection to pool
-                    if conn:
+                    if conn and db_pool and not db_pool.closed:
                         try:
-                            if conn.closed == 0:  # If connection is still open
-                                conn.rollback()  # Rollback any uncommitted changes
+                            conn.rollback()  # Rollback any uncommitted changes
                             db_pool.putconn(conn)
                         except Exception as e:
                             print(f"Error returning connection to pool: {e}")
-                return
+                            try:
+                                conn.close()
+                            except:
+                                pass
+                    return
+                
         except (psycopg2.OperationalError, psycopg2.InterfaceError, PoolError) as e:
             if conn:
                 try:
-                    db_pool.putconn(conn, close=True)
+                    if db_pool and not db_pool.closed:
+                        db_pool.putconn(conn, close=True)
+                    else:
+                        conn.close()
                 except:
                     pass
                 conn = None
             
-            if attempt == MAX_DB_RETRIES - 1:  # Last attempt
+            if attempt == MAX_DB_RETRIES - 1:
                 print(f"Failed to get connection from pool after {MAX_DB_RETRIES} attempts: {str(e)}")
                 raise
             print(f"Database connection attempt {attempt + 1} failed, retrying in {DB_RETRY_DELAY} seconds... Error: {str(e)}")
             time.sleep(DB_RETRY_DELAY)
-            
-            # Try to reinitialize the pool if we're having connection issues
-            try:
-                init_db_pool()
-            except:
-                pass
+    
+    raise Exception("Failed to get database connection after all retries")
 
 async def process_user(session, access_key, user_id, allowed_user_ids, semaphore):
     """Modified to use semaphore for DB connection management"""
@@ -370,9 +395,14 @@ def init_db_pool():
 def cleanup_db_pool():
     """Clean up the database connection pool"""
     global db_pool
-    if db_pool:
-        db_pool.closeall()
-        print("Closed all database connections in the pool")
+    if db_pool and not db_pool.closed:
+        try:
+            db_pool.closeall()
+            print("Closed all database connections in the pool")
+        except Exception as e:
+            print(f"Error during pool cleanup: {e}")
+        finally:
+            db_pool = None
 
 async def main(user_ids):
     access_key = os.environ['HAPI_KEY']
@@ -388,8 +418,8 @@ async def main(user_ids):
     # Create semaphore for limiting concurrent DB operations
     semaphore = asyncio.Semaphore(DB_SEMAPHORE_LIMIT)
 
-    async with aiohttp.ClientSession() as session:
-        try:
+    try:
+        async with aiohttp.ClientSession() as session:
             # Create tasks with semaphore
             clips_tasks = [
                 process_user(session, access_key, user_id, user_ids, semaphore) 
@@ -397,12 +427,20 @@ async def main(user_ids):
             ]
 
             # Run clips tasks concurrently
-            await asyncio.gather(*clips_tasks)
-        except Exception as e:
-            print(f"Error during processing: {str(e)}")
-            raise
-        finally:
-            cleanup_db_pool()
+            results = await asyncio.gather(*clips_tasks, return_exceptions=True)
+            
+            # Handle any exceptions that occurred
+            for result in results:
+                if isinstance(result, Exception):
+                    print(f"Task failed with error: {result}")
+                    
+    except Exception as e:
+        print(f"Error during processing: {str(e)}")
+        raise
+    finally:
+        # Ensure we wait for any pending operations before cleanup
+        await asyncio.sleep(2)  # Increased delay to ensure all operations complete
+        cleanup_db_pool()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process Instagram user clips and profiles.')
